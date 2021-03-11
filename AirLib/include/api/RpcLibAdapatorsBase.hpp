@@ -405,12 +405,6 @@ public:
             image_data_uint8 = s.image_data_uint8;
             image_data_float = s.image_data_float;
 
-            //TODO: remove bug workaround for https://github.com/rpclib/rpclib/issues/152
-            if (image_data_uint8.size() == 0)
-                image_data_uint8.push_back(0);
-            if (image_data_float.size() == 0)
-                image_data_float.push_back(0);
-
             camera_name = s.camera_name;
             camera_position = Vector3r(s.camera_position);
             camera_orientation = Quaternionr(s.camera_orientation);
@@ -471,8 +465,9 @@ public:
         msr::airlib::TTimePoint time_stamp;    // timestamp
         std::vector<float> point_cloud;        // data
         Pose pose;
+        std::vector<int> segmentation;
 
-        MSGPACK_DEFINE_MAP(time_stamp, point_cloud, pose);
+        MSGPACK_DEFINE_MAP(time_stamp, point_cloud, pose, segmentation);
 
         LidarData()
         {}
@@ -481,12 +476,8 @@ public:
         {
             time_stamp = s.time_stamp;
             point_cloud = s.point_cloud;
-
-            //TODO: remove bug workaround for https://github.com/rpclib/rpclib/issues/152
-            if (point_cloud.size() == 0)
-                point_cloud.push_back(0);
-
             pose = s.pose;
+            segmentation = s.segmentation;
         }
 
         msr::airlib::LidarData to() const
@@ -496,6 +487,7 @@ public:
             d.time_stamp = time_stamp;
             d.point_cloud = point_cloud;
             d.pose = pose.to();
+            d.segmentation = segmentation;
 
             return d;
         }
@@ -672,7 +664,7 @@ public:
         DistanceSensorData()
         {}
 
-        DistanceSensorData(const msr::airlib::DistanceBase::Output& s)
+        DistanceSensorData(const msr::airlib::DistanceSensorData& s)
         {
             time_stamp = s.time_stamp;
             distance = s.distance;
@@ -681,9 +673,9 @@ public:
             relative_pose = s.relative_pose;
         }
 
-        msr::airlib::DistanceBase::Output to() const
+        msr::airlib::DistanceSensorData to() const
         {
-            msr::airlib::DistanceBase::Output d;
+            msr::airlib::DistanceSensorData d;
 
             d.time_stamp = time_stamp;
             d.distance = distance;

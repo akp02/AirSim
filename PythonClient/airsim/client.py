@@ -110,6 +110,15 @@ class VehicleClient:
             seconds (float): Time to run the simulation for
         """
         self.client.call('simContinueForTime', seconds)
+    
+    def simContinueForFrames(self, frames):
+        """
+        Continue (or resume if paused) the simulation for the specified number of frames, after which the simulation will be paused.
+
+        Args:
+            frames (int): Frames to run the simulation for
+        """
+        self.client.call('simContinueForFrames', frames)
 
     def getHomeGeoPoint(self, vehicle_name = ''):
         """
@@ -255,6 +264,20 @@ class VehicleClient:
         responses_raw = self.client.call('simGetImages', requests, vehicle_name)
         return [ImageResponse.from_msgpack(response_raw) for response_raw in responses_raw]
 
+    def simRunConsoleCommand(self, command):
+        """
+        Allows the client to execute a command in Unreal's native console, via an API.
+        Affords access to the countless built-in commands such as "stat unit", "stat fps", "open [map]", adjust any config settings, etc. etc.
+        Allows the user to create bespoke APIs very easily, by adding a custom event to the level blueprint, and then calling the console command "ce MyEventName [args]". No recompilation of AirSim needed!
+
+        Args:
+            command ([string]): Desired Unreal Engine Console command to run
+
+        Returns:
+            [bool]: Success
+        """
+        return self.client.call('simRunConsoleCommand', command)
+
     # gets the static meshes in the unreal scene
     def simGetMeshPositionVertexBuffers(self):
         """
@@ -343,6 +366,32 @@ class VehicleClient:
         """
         return self.client.call('simSetObjectPose', object_name, pose, teleport)
 
+    def simGetObjectScale(self, object_name):
+        """
+        Gets scale of an object in the world
+
+        Args:
+            object_name (str): Object to get the scale of
+
+        Returns:
+            airsim.Vector3r: Scale
+        """
+        scale = self.client.call('simGetObjectScale', object_name)
+        return Vector3r.from_msgpack(scale)
+
+    def simSetObjectScale(self, object_name, scale_vector):
+        """
+        Sets scale of an object in the world
+
+        Args:
+            object_name (str): Object to set the scale of
+            scale_vector (airsim.Vector3r): Desired scale of object
+
+        Returns:
+            bool: True if scale change was successful
+        """
+        return self.client.call('simSetObjectScale', object_name, scale_vector)
+
     def simListSceneObjects(self, name_regex = '.*'):
         """
         Lists the objects present in the environment
@@ -356,6 +405,31 @@ class VehicleClient:
             list[str]: List containing all the names
         """
         return self.client.call('simListSceneObjects', name_regex)
+
+    def simSpawnObject(self, object_name, asset_name, pose, scale, physics_enabled=False):
+        """Spawned selected object in the world
+        
+        Args:
+            object_name (str): Desired name of new object
+            asset_name (str): Name of asset(mesh) in the project database
+            pose (airsim.Pose): Desired pose of object
+            scale (airsim.Vector3r): Desired scale of object
+        
+        Returns:
+            str: Name of spawned object, in case it had to be modified
+        """
+        return self.client.call('simSpawnObject', object_name, asset_name, pose, scale, physics_enabled)
+
+    def simDestroyObject(self, object_name):
+        """Removes selected object from the world
+        
+        Args:
+            object_name (str): Name of object to be removed
+        
+        Returns:
+            bool: True if object is queued up for removal
+        """
+        return self.client.call('simDestroyObject', object_name)
 
     def simSetSegmentationObjectID(self, mesh_name, object_id, is_name_regex = False):
         """
@@ -417,17 +491,74 @@ class VehicleClient:
         # TODO: below str() conversion is only needed for legacy reason and should be removed in future
         return CameraInfo.from_msgpack(self.client.call('simGetCameraInfo', str(camera_name), vehicle_name))
 
+    def simGetDistortionParams(self, camera_name, vehicle_name = ''):
+        """
+        Get camera distortion parameters
+
+        Args:
+            camera_name (str): Name of the camera, for backwards compatibility, ID numbers such as 0,1,etc. can also be used
+            vehicle_name (str, optional): Vehicle which the camera is associated with
+
+        Returns:
+            List (float): List of distortion parameter values corresponding to K1, K2, K3, P1, P2 respectively.
+        """
+    
+        return self.client.call('simGetDistortionParams', str(camera_name), vehicle_name)
+
+    def simSetDistortionParams(self, camera_name, distortion_params, vehicle_name = ''):
+        """
+        Set camera distortion parameters
+
+        Args:
+            camera_name (str): Name of the camera, for backwards compatibility, ID numbers such as 0,1,etc. can also be used
+            distortion_params (dict): Dictionary of distortion param names and corresponding values
+                                        {"K1": 0.0, "K2": 0.0, "K3": 0.0, "P1": 0.0, "P2": 0.0}
+            vehicle_name (str, optional): Vehicle which the camera is associated with
+        """
+
+        for param_name, value in distortion_params.items():
+            self.client.call('simSetDistortionParam', str(camera_name), param_name, value, vehicle_name)
+
+    def simSetDistortionParam(self, camera_name, param_name, value, vehicle_name = ''):
+        """
+        Set single camera distortion parameter
+
+        Args:
+            camera_name (str): Name of the camera, for backwards compatibility, ID numbers such as 0,1,etc. can also be used
+            param_name (str): Name of distortion parameter
+            value (float): Value of distortion parameter
+            vehicle_name (str, optional): Vehicle which the camera is associated with
+        """
+        self.client.call('simSetDistortionParam', str(camera_name), param_name, value, vehicle_name)
+
+    def simSetCameraPose(self, camera_name, pose, vehicle_name = ''):
+        """
+        - Control the pose of a selected camera
+
+        Args:
+            camera_name (str): Name of the camera to be controlled
+            pose (Pose): Pose representing the desired position and orientation of the camera
+            vehicle_name (str, optional): Name of vehicle which the camera corresponds to
+        """
+        # TODO: below str() conversion is only needed for legacy reason and should be removed in future
+        self.client.call('simSetCameraPose', str(camera_name), pose, vehicle_name)
+
     def simSetCameraOrientation(self, camera_name, orientation, vehicle_name = ''):
         """
-        - Control the orientation of a selected camera
+        .. note::
+
+            This API has been upgraded to `simSetCameraPose`
+
+        - Control the Orientation of a selected camera
 
         Args:
             camera_name (str): Name of the camera to be controlled
             orientation (Quaternionr): Quaternion representing the desired orientation of the camera
             vehicle_name (str, optional): Name of vehicle which the camera corresponds to
         """
-        # TODO: below str() conversion is only needed for legacy reason and should be removed in future
-        self.client.call('simSetCameraOrientation', str(camera_name), orientation, vehicle_name)
+        logging.warning("`simSetCameraOrientation` API has been upgraded to `simSetCameraPose`. Please update your code.")
+        pose = Pose(orientation_val=orientation)
+        self.simSetCameraPose(camera_name, pose, vehicle_name)
 
     def simSetCameraFov(self, camera_name, fov_degrees, vehicle_name = ''):
         """
@@ -538,6 +669,7 @@ class VehicleClient:
 
     def simGetLidarSegmentation(self, lidar_name = '', vehicle_name = ''):
         """
+        NOTE: Deprecated API, use `getLidarData()` API instead
         Returns Segmentation ID of each point's collided object in the last Lidar update
 
         Args:
@@ -547,7 +679,8 @@ class VehicleClient:
         Returns:
             list[int]: Segmentation IDs of the objects
         """
-        return self.client.call('simGetLidarSegmentation', lidar_name, vehicle_name)
+        logging.warning("simGetLidarSegmentation API is deprecated, use getLidarData() API instead")
+        return self.getLidarData(lidar_name, vehicle_name).segmentation
 
     #  Plotting APIs
     def simFlushPersistentMarkers(self):
@@ -675,6 +808,70 @@ class VehicleClient:
         """
         return self.client.call('waitOnLastTask', timeout_sec)
 
+    # Recording APIs
+    def startRecording(self):
+        """
+        Start Recording
+
+        Recording will be done according to the settings
+        """
+        self.client.call('startRecording')
+
+    def stopRecording(self):
+        """
+        Stop Recording
+        """
+        self.client.call('stopRecording')
+
+    def isRecording(self):
+        """
+        Whether Recording is running or not
+
+        Returns:
+            bool: True if Recording, else False
+        """
+        return self.client.call('isRecording')
+
+    def simSetWind(self, wind):
+        """
+        Set simulated wind, in World frame, NED direction, m/s
+
+        Args:
+            wind (Vector3r): Wind, in World frame, NED direction, in m/s 
+        """
+        self.client.call('simSetWind', wind)
+
+    def simCreateVoxelGrid(self, position, x, y, z, res, of):
+        """
+        Construct and save a binvox-formatted voxel grid of environment
+
+        Args:
+            position (Vector3r): Position around which voxel grid is centered in m
+            x, y, z (int): Size of each voxel grid dimension in m
+            res (float): Resolution of voxel grid in m
+            of (str): Name of output file to save voxel grid as
+
+        Returns:
+            bool: True if output written to file successfully, else False
+        """
+        return self.client.call('simCreateVoxelGrid', position, x, y, z, res, of)
+
+    # Add new vehicle via RPC
+    def simAddVehicle(self, vehicle_name, vehicle_type, pose, pawn_path = ""):
+        """
+        Create vehicle at runtime
+
+        Args:
+            vehicle_name (str): Name of the vehicle being created
+            vehicle_type (str): Type of vehicle, e.g. "simpleflight"
+            pose (Pose): Initial pose of the vehicle
+            pawn_path (str): Vehicle blueprint path, default empty wbich uses the default blueprint for the vehicle type
+
+        Returns:
+            bool: Whether vehicle was created
+        """
+        return self.client.call('simAddVehicle', vehicle_name, vehicle_type, pose, pawn_path)
+
 # -----------------------------------  Multirotor APIs ---------------------------------------------
 class MultirotorClient(VehicleClient, object):
     def __init__(self, ip = "", port = 41451, timeout_value = 3600):
@@ -720,6 +917,22 @@ class MultirotorClient(VehicleClient, object):
         return self.client.call_async('goHome', timeout_sec, vehicle_name)
 
     # APIs for control
+    def moveByVelocityBodyFrameAsync(self, vx, vy, vz, duration, drivetrain = DrivetrainType.MaxDegreeOfFreedom, yaw_mode = YawMode(), vehicle_name = ''):
+        """
+        Args:
+            vx (float): desired velocity in the X axis of the vehicle's local NED frame.
+            vy (float): desired velocity in the Y axis of the vehicle's local NED frame.
+            vz (float): desired velocity in the Z axis of the vehicle's local NED frame.
+            duration (float): Desired amount of time (seconds), to send this command for
+            drivetrain (DrivetrainType, optional):
+            yaw_mode (YawMode, optional):
+            vehicle_name (str, optional): Name of the multirotor to send this command to
+
+        Returns:
+            msgpackrpc.future.Future: future. call .join() to wait for method to finish. Example: client.METHOD().join()
+        """
+        return self.client.call_async('moveByVelocityBodyFrame', vx, vy, vz, duration, drivetrain, yaw_mode, vehicle_name)
+        
     def moveByAngleZAsync(self, pitch, roll, z, yaw, duration, vehicle_name = ''):
         return self.client.call_async('moveByAngleZ', pitch, roll, z, yaw, duration, vehicle_name)
 
@@ -1087,7 +1300,20 @@ class MultirotorClient(VehicleClient, object):
         """
         return MultirotorState.from_msgpack(self.client.call('getMultirotorState', vehicle_name))
     getMultirotorState.__annotations__ = {'return': MultirotorState}
+    # query rotor states
+    def getRotorStates(self, vehicle_name = ''):
+        """
+        Used to obtain the current state of all a multirotor's rotors. The state includes the speeds,
+        thrusts and torques for all rotors.
 
+        Args:
+            vehicle_name (str, optional): Vehicle to get the rotor state of
+
+        Returns:
+            RotorStates: Containing a timestamp and the speed, thrust and torque of all rotors.
+        """
+        return RotorStates.from_msgpack(self.client.call('getRotorStates', vehicle_name))
+    getRotorStates.__annotations__ = {'return': RotorStates}
 
 # -----------------------------------  Car APIs ---------------------------------------------
 class CarClient(VehicleClient, object):

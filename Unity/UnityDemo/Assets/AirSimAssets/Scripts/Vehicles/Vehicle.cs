@@ -67,6 +67,8 @@ namespace AirSimUnity {
                 Application.Quit();
 #endif
             }
+
+            AirSimGlobal.Instance.Weather.AttachToVehicle(this);
         }
 
         //Ensure to call this method as the first statement, from derived class `FixedUpdate()` method.
@@ -264,10 +266,10 @@ namespace AirSimUnity {
             return info;
         }
 
-        public bool SetCameraOrientation(string cameraName, AirSimQuaternion orientation) {
+        public bool SetCameraPose(string cameraName, AirSimPose pose) {
             foreach (DataCaptureScript capture in captureCameras) {
                 if (capture.GetCameraName() == cameraName) {
-                    capture.SetOrientation(orientation);
+                    capture.SetPose(pose);
                     return true;
                 }
             }
@@ -281,6 +283,18 @@ namespace AirSimUnity {
                     return true;;
                 }
             }
+            return false;
+        }
+
+        public bool SetDistortionParam(string cameraName, string paramName, float value)
+        {
+            // not implemented
+            return false;
+        }
+
+        public bool GetDistortionParams(string cameraName)
+        {
+            // not implemented
             return false;
         }
 

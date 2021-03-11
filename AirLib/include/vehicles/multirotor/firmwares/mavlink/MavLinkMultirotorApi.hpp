@@ -116,15 +116,13 @@ public: //methods
             const uint count_distance_sensors = getSensors().size(SensorBase::SensorType::Distance);
             if (count_distance_sensors != 0) {
                 const auto& distance_output = getDistanceSensorData("");
-                float pitch, roll, yaw;
-                VectorMath::toEulerianAngle(distance_output.relative_pose.orientation, pitch, roll, yaw);
 
-                sendDistanceSensor(distance_output.min_distance / 100, //m -> cm
-                    distance_output.max_distance / 100, //m -> cm
-                    distance_output.distance,
+                sendDistanceSensor(distance_output.min_distance * 100, //m -> cm
+                    distance_output.max_distance * 100, //m -> cm
+                    distance_output.distance * 100, //m-> cm
                     0, //sensor type: //TODO: allow changing in settings?
                     77, //sensor id, //TODO: should this be something real?
-                    pitch); //TODO: convert from radians to degrees?
+                    distance_output.relative_pose.orientation); //TODO: convert from radians to degrees?
             }
 
             const uint count_gps_sensors = getSensors().size(SensorBase::SensorType::Gps);
@@ -614,6 +612,7 @@ protected: //methods
     virtual void disconnect() {
         addStatusMessage("Disconnecting mavlink vehicle");
         connected_ = false;
+        connecting_ = false;
         if (connection_ != nullptr) {
             if (is_hil_mode_set_ && mav_vehicle_ != nullptr) {
                 setNormalMode();
@@ -627,7 +626,10 @@ protected: //methods
         }
 
         if (mav_vehicle_ != nullptr) {
-            mav_vehicle_->getConnection()->stopLoggingSendMessage();
+            auto c = mav_vehicle_->getConnection();
+            if (c != nullptr) {
+                c->stopLoggingSendMessage();
+            }
             mav_vehicle_->close();
             mav_vehicle_ = nullptr;
         }
@@ -654,6 +656,7 @@ protected: //methods
     void connect_thread()
     {
         addStatusMessage("Waiting for mavlink vehicle...");
+        connecting_ = true;
         createMavConnection(connection_info_);
         if (mav_vehicle_ != nullptr) {
             connectToLogViewer();
@@ -932,7 +935,7 @@ private: //methods
             mavlinkcom::SerialPortInfo info = *iter;
             if ((
                 (info.vid == pixhawkVendorId) &&
-                (info.pid == pixhawkFMUV4ProductId || info.pid == pixhawkFMUV2ProductId || info.pid == pixhawkFMUV2OldBootloaderProductId)
+                (info.pid == pixhawkFMUV4ProductId || info.pid == pixhawkFMUV2ProductId || info.pid == pixhawkFMUV2OldBootloaderProductId || info.pid == pixhawkFMUV5ProductId)
                 ) ||
                 (
                     (info.displayName.find(L"PX4_") != std::string::npos)
@@ -968,6 +971,7 @@ private: //methods
     {
         close();
 
+        connecting_ = true;
         got_first_heartbeat_ = false;
         is_hil_mode_set_ = false;
         is_armed_ = false;
@@ -1033,13 +1037,24 @@ private: //methods
                 connection_info_.control_port, connection_info_.local_host_ip.c_str(), connection_info_.control_ip_address.c_str()));
 
             // if we try and connect the UDP port too quickly it doesn't work, bug in PX4 ?
-            std::this_thread::sleep_for(std::chrono::seconds(2));
+            for (int retries = 60; retries >= 0 && connecting_; retries--) {
+                try {
+                    auto gcsConnection = mavlinkcom::MavLinkConnection::connectRemoteUdp("gcs",
+                        connection_info_.local_host_ip, connection_info_.control_ip_address, connection_info_.control_port);
+                    mav_vehicle_->connect(gcsConnection);
+                }
+                catch (std::exception&) {
+                    std::this_thread::sleep_for(std::chrono::seconds(1));
+                }
+            }
 
-            auto gcsConnection = mavlinkcom::MavLinkConnection::connectRemoteUdp("gcs",
-                connection_info_.local_host_ip, connection_info_.control_ip_address, connection_info_.control_port);
-            mav_vehicle_->connect(gcsConnection);
-
-            addStatusMessage(std::string("Ground control connected over UDP."));
+            if (mav_vehicle_->getConnection() != nullptr) {
+                addStatusMessage(std::string("Ground control connected over UDP."));
+            }
+            else {
+                addStatusMessage(std::string("Timeout trying to connect ground control over UDP."));
+                return;
+            }
         }
 
         connectVehicle();
@@ -1071,6 +1086,7 @@ private: //methods
     {
         close();
 
+        connecting_ = true;
         bool reported = false;
         std::string port_name_auto = port_name;
         while (port_name_auto == "" || port_name_auto == "*") {
@@ -1098,7 +1114,7 @@ private: //methods
         addStatusMessage(Utils::stringf("Connecting to PX4 over serial port: %s, baud rate %d ....", port_name_auto.c_str(), baud_rate));
         reported = false;
 
-        while (true) {
+        while (connecting_) {
             try {
                 connection_ = mavlinkcom::MavLinkConnection::connectSerial("hil", port_name_auto, baud_rate);
                 connection_->ignoreMessage(mavlinkcom::MavLinkAttPosMocap::kMessageId); //TODO: find better way to communicate debug pose instead of using fake Mo-cap messages
@@ -1323,7 +1339,7 @@ private: //methods
         if (!is_simulation_mode_)
             throw std::logic_error("Attempt to send simulated sensor messages while not in simulation mode");
 
-        auto now = static_cast<uint64_t>(Utils::getTimeSinceEpochNanos() / 1000.0);
+        auto now = clock()->nowNanos() / 1000;
         if (lock_step_enabled_) {
             if (last_hil_sensor_time_ + 100000 < now) {
                 // if 100 ms passes then something is terribly wrong, reset lockstep mode
@@ -1379,20 +1395,27 @@ private: //methods
         last_sensor_message_ = hil_sensor;
     }
 
-    void sendDistanceSensor(float min_distance, float max_distance, float current_distance, float sensor_type, float sensor_id, float orientation)
+    void sendDistanceSensor(float min_distance, float max_distance, float current_distance, float sensor_type, float sensor_id, Quaternionr orientation)
     {
         if (!is_simulation_mode_)
             throw std::logic_error("Attempt to send simulated distance sensor messages while not in simulation mode");
 
         mavlinkcom::MavLinkDistanceSensor distance_sensor;
-        distance_sensor.time_boot_ms = static_cast<uint32_t>(Utils::getTimeSinceEpochNanos() / 1000000.0);
 
+        distance_sensor.time_boot_ms = static_cast<uint32_t>(clock()->nowNanos() / 1000000);
         distance_sensor.min_distance = static_cast<uint16_t>(min_distance);
         distance_sensor.max_distance = static_cast<uint16_t>(max_distance);
         distance_sensor.current_distance = static_cast<uint16_t>(current_distance);
         distance_sensor.type = static_cast<uint8_t>(sensor_type);
         distance_sensor.id = static_cast<uint8_t>(sensor_id);
-        distance_sensor.orientation = static_cast<uint8_t>(orientation);
+
+        // Use custom orientation
+        distance_sensor.orientation = 100;  // MAV_SENSOR_ROTATION_CUSTOM
+        distance_sensor.quaternion[0] = orientation.w();
+        distance_sensor.quaternion[1] = orientation.x();
+        distance_sensor.quaternion[2] = orientation.y();
+        distance_sensor.quaternion[3] = orientation.z();
+
         //TODO: use covariance parameter?
 
         if (hil_node_ != nullptr) {
@@ -1491,6 +1514,7 @@ private: //variables
     static const int pixhawkVendorId = 9900;   ///< Vendor ID for Pixhawk board (V2 and V1) and PX4 Flow
     static const int pixhawkFMUV4ProductId = 18;     ///< Product ID for Pixhawk V2 board
     static const int pixhawkFMUV2ProductId = 17;     ///< Product ID for Pixhawk V2 board
+    static const int pixhawkFMUV5ProductId = 50;     ///< Product ID for Pixhawk V5 board
     static const int pixhawkFMUV2OldBootloaderProductId = 22;     ///< Product ID for Bootloader on older Pixhawk V2 boards
     static const int pixhawkFMUV1ProductId = 16;     ///< Product ID for PX4 FMU V1 board
     static const int messageReceivedTimeout = 10; ///< Seconds

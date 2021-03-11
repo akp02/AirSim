@@ -75,6 +75,14 @@ MultirotorRpcLibClient* MultirotorRpcLibClient::goHomeAsync(float timeout_sec, c
     return this;
 }
 
+MultirotorRpcLibClient* MultirotorRpcLibClient::moveByVelocityBodyFrameAsync(float vx, float vy, float vz, float duration,
+    DrivetrainType drivetrain, const YawMode& yaw_mode, const std::string& vehicle_name)
+{
+    pimpl_->last_future = static_cast<rpc::client*>(getClient())->async_call("moveByVelocityBodyFrame", vx, vy, vz, duration,
+        drivetrain, MultirotorRpcLibAdapators::YawMode(yaw_mode), vehicle_name);
+    return this;
+}
+
 MultirotorRpcLibClient* MultirotorRpcLibClient::moveByMotorPWMsAsync(float front_right_pwm, float rear_left_pwm, float front_left_pwm, float rear_right_pwm, float duration, const std::string& vehicle_name)
 {
     pimpl_->last_future = static_cast<rpc::client*>(getClient())->async_call("moveByMotorPWMs", front_right_pwm, rear_left_pwm, front_left_pwm, rear_right_pwm, duration, vehicle_name);
@@ -213,6 +221,13 @@ bool MultirotorRpcLibClient::setSafety(SafetyEval::SafetyViolationType enable_re
 }
 
 //status getters
+// Rotor state getter
+RotorStates MultirotorRpcLibClient::getRotorStates(const std::string& vehicle_name)
+{
+    return static_cast<rpc::client*>(getClient())->call("getRotorStates", vehicle_name).
+        as<MultirotorRpcLibAdapators::RotorStates>().to();
+}
+// Multirotor state getter
 MultirotorState MultirotorRpcLibClient::getMultirotorState(const std::string& vehicle_name)
 {
     return static_cast<rpc::client*>(getClient())->call("getMultirotorState", vehicle_name).
